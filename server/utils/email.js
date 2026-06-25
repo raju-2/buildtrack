@@ -1,9 +1,27 @@
+/**
+ * Email sending.
+ *
+ * Primary path: Resend (https://resend.com) — sends over plain HTTPS, which
+ * works reliably on PaaS providers like Render. SMTP ports (587/465) are
+ * often blocked or heavily throttled on free-tier hosting, which causes
+ * Gmail SMTP to hang and eventually time out in production.
+ *
+ * Fallback path: Nodemailer/SMTP — used automatically if RESEND_API_KEY is
+ * not set, so local development can keep using a Gmail App Password without
+ * any extra signup. Once RESEND_API_KEY is set (recommended for production),
+ * Resend is used automatically instead.
+ */
 const nodemailer = require('nodemailer');
 
-/**
- * Creates a reusable Nodemailer transporter using SMTP credentials from .env
- */
-const createTransporter = () =>
+const usingResend = !!process.env.RESEND_API_KEY;
+
+let resendClient;
+if (usingResend) {
+  const { Resend } = require('resend');
+  resendClient = new Resend(process.env.RESEND_API_KEY);
+}
+
+const createSmtpTransporter = () =>
   nodemailer.createTransport({
     host: process.env.EMAIL_HOST,
     port: Number(process.env.EMAIL_PORT) || 587,
@@ -12,16 +30,26 @@ const createTransporter = () =>
       user: process.env.EMAIL_USER,
       pass: process.env.EMAIL_PASS,
     },
+    connectionTimeout: 10000, // fail fast (10s) instead of hanging for minutes
   });
 
 /**
- * Sends an email. Throws on failure so callers can decide how to handle it.
- * @param {string} to - recipient email
- * @param {string} subject
- * @param {string} html
+ * Sends an email via Resend if configured, otherwise falls back to SMTP.
+ * Throws on failure so callers can decide how to handle it.
  */
 const sendEmail = async ({ to, subject, html }) => {
-  const transporter = createTransporter();
+  if (usingResend) {
+    const { error } = await resendClient.emails.send({
+      from: process.env.EMAIL_FROM || 'BuildTrack <onboarding@resend.dev>',
+      to,
+      subject,
+      html,
+    });
+    if (error) throw new Error(error.message || 'Resend failed to send email');
+    return;
+  }
+
+  const transporter = createSmtpTransporter();
   await transporter.sendMail({
     from: process.env.EMAIL_FROM || process.env.EMAIL_USER,
     to,

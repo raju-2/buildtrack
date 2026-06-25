@@ -24,6 +24,11 @@ connectDB();
 
 const app = express();
 
+// Render (and most PaaS providers) sit behind a reverse proxy, so Express
+// needs to trust the X-Forwarded-For header to correctly identify client IPs
+// (required for express-rate-limit to work correctly in production).
+app.set('trust proxy', 1);
+
 // --- Security & parsing middleware ---
 const allowedOrigins = [process.env.CLIENT_URL, 'http://localhost:5173', 'http://localhost:3000'].filter(Boolean);
 
